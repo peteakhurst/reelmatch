@@ -14,13 +14,13 @@ export function PartyEntry() {
   const { joinRoom, generateCode } = useRoomContext();
   const [draft, setDraft] = useState('');
 
-  const enter = (code: string) => {
+  const enter = (code: string, create = false) => {
     Haptics.selectionAsync().catch(() => {});
-    joinRoom(code);
+    joinRoom(code, { create });
     router.replace('/party/room');
   };
 
-  const create = () => enter(generateCode());
+  const create = () => enter(generateCode(), true);
 
   const join = () => {
     const code = draft.trim().toUpperCase();
@@ -42,8 +42,8 @@ export function PartyEntry() {
             </View>
             <Text style={styles.title}>BRING YOUR CREW.</Text>
             <Text style={styles.body}>
-              Spin up a room or punch in a friend's code. Everyone swipes the same deck — match
-              when you both queue the same film.
+              Spin up a room or punch in a friend&apos;s code. Everyone swipes the same deck — together
+              or on your own time — and you match when you all queue the same film.
             </Text>
 
             {/* CREATE */}

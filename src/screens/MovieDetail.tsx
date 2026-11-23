@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Dimensions, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TapeLabel } from '../components/TapeLabel';
@@ -11,7 +11,7 @@ import { posterUrl } from '../lib/api';
 import { pickGenreLabel } from '../lib/genres';
 import { useWatchlist } from '../state/watchlist';
 import type { ProviderChip, SampleMovie } from '../data/sampleMovies';
-import { palette, spacing, text, useAccent } from '../theme';
+import { palette, spacing, text, useAccent, useContentWidth } from '../theme';
 
 const REGION = 'AU';
 
@@ -41,7 +41,6 @@ function toSampleMovie(d: EnrichedMovie): SampleMovie {
   };
 }
 
-const { width: SCREEN_W } = Dimensions.get('window');
 const BACKDROP_H = 380;
 const BODY_OVERLAP = 140;
 
@@ -202,7 +201,7 @@ export function MovieDetail({ id }: { id: number }) {
 }
 
 function TrailerPlayer({ keys, accent }: { keys: string[]; accent: string }) {
-  const trailerW = SCREEN_W - spacing.edge * 2;
+  const trailerW = useContentWidth() - spacing.edge * 2;
   const trailerH = Math.round((trailerW * 9) / 16);
   const key = keys[0];
 

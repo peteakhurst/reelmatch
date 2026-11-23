@@ -1,13 +1,16 @@
-import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
-import { useUser } from './user';
-import { useRoom, type Member } from '../hooks/useRoom';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useUser } from './user';
+import { useRoom, type Member, type RoomIntent } from '../hooks/useRoom';
 
-type ContextValue = ReturnType<typeof useRoom> & {
+type ContextValue = Omit<ReturnType<typeof useRoom>, 'leave' | 'updateSettings'> & {
   code: string | null;
+  /** In a room that exists (code set and not "not found"). */
+  active: boolean;
   myId: string | null;
-  joinRoom: (code: string) => void;
+  isHost: boolean;
+  /** Join an existing room, or create it with `{ create: true }`. */
+  joinRoom: (code: string, opts?: { create?: boolean }) => void;
   leaveRoom: () => void;
   generateCode: () => string;
 };
@@ -22,13 +25,13 @@ function makeCode(len = 6) {
 }
 
 const ID_STORAGE_KEY = '@reelmatch/memberId/v1';
+const ROOM_STORAGE_KEY = '@reelmatch/room/v1';
 
 /**
  * Stable per-install user id. Persists across reloads via AsyncStorage so
- * rejoining a room (or hot-reload during dev) gives the same identity instead
- * of looking like a brand-new person every time. The returned Member object is
- * memoized on (id, name, joinedAt) so the useRoom effect doesn't tear down the
- * Supabase channel on every render.
+ * rejoining a room gives the same identity instead of looking like a
+ * brand-new person every time. Memoized on (id, name, joinedAt) so the
+ * useRoom effect doesn't tear down the Supabase channel on every render.
  */
 function useStableMember(): Member | null {
   const { name } = useUser();
@@ -52,30 +55,81 @@ function useStableMember(): Member | null {
     };
   }, []);
 
-  return useMemo<Member | null>(
-    () => (name && id ? { id, name, joinedAt } : null),
-    [name, id, joinedAt],
-  );
+  return useMemo<Member | null>(() => (name && id ? { id, name, joinedAt } : null), [name, id, joinedAt]);
 }
 
 export function RoomProvider({ children }: { children: ReactNode }) {
-  const { genres } = useUser();
+  const { genres, mode } = useUser();
   const [code, setCode] = useState<string | null>(null);
-  const baseMember = useStableMember();
-  // Attach the user's current genre picks so other members can adopt the
-  // host's selection — keeps the deck identical across phones.
-  const me = useMemo<Member | null>(
-    () => (baseMember ? { ...baseMember, genres } : null),
-    [baseMember, genres],
-  );
-  const room = useRoom(code, me);
+  const [intent, setIntent] = useState<RoomIntent>({ create: false, genres, mode });
+  const restoredRef = useRef(false);
+  const me = useStableMember();
+  const prefs = useMemo(() => ({ genres, mode }), [genres, mode]);
+  const { leave, updateSettings, ...room } = useRoom(code, me, intent, prefs);
 
-  const joinRoom = useCallback((c: string) => setCode(c.toUpperCase()), []);
-  const leaveRoom = useCallback(() => setCode(null), []);
+  // Rooms persist — rejoin the last one on launch.
+  useEffect(() => {
+    AsyncStorage.getItem(ROOM_STORAGE_KEY)
+      .then((saved) => {
+        if (saved) {
+          restoredRef.current = true;
+          setCode((c) => c ?? saved);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const joinRoom = useCallback(
+    (c: string, opts?: { create?: boolean }) => {
+      const upper = c.toUpperCase();
+      restoredRef.current = false;
+      setIntent({ create: !!opts?.create, genres, mode });
+      setCode(upper);
+      AsyncStorage.setItem(ROOM_STORAGE_KEY, upper).catch(() => {});
+    },
+    [genres, mode],
+  );
+
+  const leaveRoom = useCallback(() => {
+    void leave();
+    setCode(null);
+    AsyncStorage.removeItem(ROOM_STORAGE_KEY).catch(() => {});
+  }, [leave]);
+
+  // A room we auto-rejoined on launch has since been deleted → quietly drop it.
+  useEffect(() => {
+    if (room.status === 'not_found' && restoredRef.current) {
+      restoredRef.current = false;
+      setCode(null);
+      AsyncStorage.removeItem(ROOM_STORAGE_KEY).catch(() => {});
+    }
+  }, [room.status]);
+
+  const myId = me?.id ?? null;
+  const isHost = !!room.settings && room.settings.hostId === myId;
+
+  // The host's own genre/mode picks drive the room's shared deck.
+  useEffect(() => {
+    if (!isHost || !room.persisted || room.status !== 'connected' || !room.settings) return;
+    const same =
+      room.settings.mode === mode &&
+      room.settings.genres.length === genres.length &&
+      room.settings.genres.every((g, i) => g === genres[i]);
+    if (!same) updateSettings(genres, mode).catch((err) => console.warn('[room] settings update failed', err));
+  }, [isHost, room.persisted, room.status, room.settings, genres, mode, updateSettings]);
 
   const value = useMemo<ContextValue>(
-    () => ({ ...room, code, myId: me?.id ?? null, joinRoom, leaveRoom, generateCode: makeCode }),
-    [room, code, me, joinRoom, leaveRoom],
+    () => ({
+      ...room,
+      code,
+      active: !!code && room.status !== 'not_found',
+      myId,
+      isHost,
+      joinRoom,
+      leaveRoom,
+      generateCode: makeCode,
+    }),
+    [room, code, myId, isHost, joinRoom, leaveRoom],
   );
 
   return <RoomContext.Provider value={value}>{children}</RoomContext.Provider>;

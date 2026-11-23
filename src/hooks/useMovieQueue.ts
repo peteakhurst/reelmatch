@@ -81,24 +81,27 @@ type Result = State & { refetch: () => void };
  * the cards just ahead of `cursor` with runtime/trailer/providers.
  *
  * Solo: films already on any list (or snoozed via LATER) are filtered out so
- * they don't come back. In a room the filter is skipped so every phone deals
- * the same cards — a film you queued solo still needs to count for the room.
+ * they don't come back. In a room we only skip films *you've* swiped in that
+ * room — a film you queued solo still needs to count for the room's match.
  *
  * Falls back to the bundled SAMPLE_MOVIES if the first page can't load.
  */
 export function useMovieQueue(cursor: number): Result {
-  const { genres: myGenres, mode } = useUser();
-  const { code: roomCode, members } = useRoomContext();
+  const { genres: myGenres, mode: myMode } = useUser();
+  const room = useRoomContext();
   const watchlist = useWatchlist();
-  const inRoom = !!roomCode;
-  // In a room: use the host's genres (first member by joinedAt) so every phone
-  // sees the same deck. Solo: use my own picks. OR semantics ('|') because TMDB
-  // treats commas as AND, which collapses the set on most realistic combos.
-  const effectiveGenres = inRoom && members[0]?.genres?.length ? members[0].genres : myGenres;
+  const inRoom = room.active;
+  const roomCode = room.code;
+  // In a room everyone deals from the host's filter (stored on the room) so
+  // phones see the same films in the same order. OR semantics ('|') because
+  // TMDB treats commas as AND, which collapses the set on most combos.
+  const effectiveGenres = inRoom ? (room.settings?.genres ?? []) : myGenres;
+  const mode = inRoom ? (room.settings?.mode ?? 'all') : myMode;
   const genreKey = effectiveGenres.join('|');
-
+  // Don't deal a room deck until we know the room's filter.
+  const ready = !inRoom || !!room.settings;
   const [generation, setGeneration] = useState(0);
-  const deckKey = `${genreKey}/${mode}/${inRoom ? roomCode : 'solo'}/${generation}`;
+  const deckKey = `${genreKey}/${mode}/${inRoom ? roomCode : 'solo'}/${ready ? 'ready' : 'wait'}/${generation}`;
 
   const [state, setState] = useState<State>({
     movies: [],
@@ -123,6 +126,10 @@ export function useMovieQueue(cursor: number): Result {
   listsRef.current = watchlist;
   const inRoomRef = useRef(inRoom);
   inRoomRef.current = inRoom;
+  // Films I've already swiped in this room (stored server-side, so this
+  // survives reinstalls and works across sessions).
+  const myRoomSwipesRef = useRef<Record<number, unknown>>({});
+  myRoomSwipesRef.current = (room.myId && room.swipes[room.myId]) || {};
 
   const fetchPage = useCallback(
     async (page: number) => {
@@ -154,7 +161,9 @@ export function useMovieQueue(cursor: number): Result {
         if (deckRef.current !== myDeck) return; // deck changed mid-flight
         pageRef.current = next;
         totalPagesRef.current = Math.min(res.total_pages ?? Infinity, 500); // TMDB caps at 500
-        const exclude = inRoomRef.current ? new Set<number>() : buildExcludeSet(listsRef.current);
+        const exclude = inRoomRef.current
+          ? new Set(Object.keys(myRoomSwipesRef.current).map(Number))
+          : buildExcludeSet(listsRef.current);
         added = res.results.filter((m) => !exclude.has(m.id)).map(toCard);
         if (added.length) {
           setState((s) => {
@@ -200,16 +209,16 @@ export function useMovieQueue(cursor: number): Result {
       source: 'live',
       deckKey,
     });
-    loadMore();
+    if (ready) loadMore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckKey]);
 
   // Prefetch the next page as the cursor approaches the end.
   const { movies, exhausted, source } = state;
   useEffect(() => {
-    if (state.deckKey !== deckKey || source === 'sample' || exhausted) return;
+    if (!ready || state.deckKey !== deckKey || source === 'sample' || exhausted) return;
     if (movies.length && movies.length - cursor <= PREFETCH_AT) loadMore();
-  }, [cursor, movies.length, exhausted, source, loadMore, state.deckKey, deckKey]);
+  }, [ready, cursor, movies.length, exhausted, source, loadMore, state.deckKey, deckKey]);
 
   // Enrich the cards just ahead of the cursor.
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActionSheetIOS, Dimensions, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActionSheetIOS, LayoutChangeEvent, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Extrapolation,
@@ -28,15 +28,6 @@ import { palette, sizes, spacing, text, useAccent } from '../theme';
 
 type Direction = 'left' | 'right' | 'up' | 'down';
 const SWIPE_THRESHOLD = 120;
-const SCREEN = Dimensions.get('window');
-const FLY_DISTANCE = SCREEN.width * 1.4;
-
-const DIR_TO_LABEL: Record<Direction, string> = {
-  right: 'QUEUE',
-  left: 'NOPE',
-  up: 'SEEN',
-  down: 'LATER',
-};
 
 const DIR_TO_LIST: Record<Direction, ListName> = {
   right: 'queue',
@@ -51,12 +42,13 @@ const DIR_TO_LIST: Record<Direction, ListName> = {
  * and aren't blanked out while a refetch is in flight.
  */
 function LoadingBar({ accent }: { accent: string }) {
+  const { width: screenW } = useWindowDimensions();
   const offset = useSharedValue(-1);
   useEffect(() => {
     offset.value = withRepeat(withTiming(1, { duration: 1100 }), -1, false);
   }, [offset]);
   const animStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: SCREEN.width * offset.value }],
+    transform: [{ translateX: screenW * offset.value }],
   }));
   return (
     <View pointerEvents="none" style={loadStyles.track}>
@@ -92,16 +84,33 @@ export function SwipeDeck() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { hex: accent } = useAccent();
+  // Re-read on every render so fold/unfold (iPhone Duo) and window resizes
+  // update the swipe physics and card size — never cache at module load.
+  const { width: screenW } = useWindowDimensions();
+  const flyDistance = screenW * 1.4;
+  // Space the deck actually has between the top chrome and the action row.
+  const [deckArea, setDeckArea] = useState<{ w: number; h: number } | null>(null);
+  const onDeckLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setDeckArea((prev) => (prev && prev.w === width && prev.h === height ? prev : { w: width, h: height }));
+  }, []);
+  const card = useMemo(() => {
+    if (!deckArea) return null;
+    // Fit the largest poster-shaped card into the available box. On phones
+    // this lands at the design's ~510pt; taller screens (iPhone Duo open) grow.
+    const h = Math.min(deckArea.h, deckArea.w / sizes.cardAspect);
+    const w = Math.min(deckArea.w, h * sizes.cardAspect);
+    return { w, h };
+  }, [deckArea]);
   const { reset: wipeUser, genres: pickedGenres, mode, setMode } = useUser();
   const { add: addToWatchlist, queue: queueList, clearAll: wipeWatchlist } = useWatchlist();
   const room = useRoomContext();
-  const inRoom = !!room.code;
-  // While in a room, the deck is filtered by the host's genres (see useMovieQueue).
-  // Show those in the chip so the label matches what you're actually seeing.
-  const host = inRoom ? room.members[0] : null;
-  const isHost = inRoom && host?.id === room.myId;
-  const effectiveGenres =
-    inRoom && host?.genres?.length ? host.genres : pickedGenres;
+  const inRoom = room.active;
+  // While in a room the deck follows the room's (host-owned) filter. Show that
+  // in the chips so the labels match what you're actually seeing.
+  const isHost = inRoom && room.isHost;
+  const effectiveGenres = inRoom ? (room.settings?.genres ?? []) : pickedGenres;
+  const effectiveMode = inRoom ? (room.settings?.mode ?? 'all') : mode;
   const canEditGenres = !inRoom || isHost;
   // shared values for the front card's drag offset (UI-thread)
   const tx = useSharedValue(0);
@@ -151,10 +160,10 @@ export function SwipeDeck() {
     (direction: Direction) => {
       'worklet';
       const map: Record<Direction, { x: number; y: number }> = {
-        left: { x: -FLY_DISTANCE, y: 0 },
-        right: { x: FLY_DISTANCE, y: 0 },
-        up: { x: 0, y: -FLY_DISTANCE },
-        down: { x: 0, y: FLY_DISTANCE },
+        left: { x: -flyDistance, y: 0 },
+        right: { x: flyDistance, y: 0 },
+        up: { x: 0, y: -flyDistance },
+        down: { x: 0, y: flyDistance },
       };
       const target = map[direction];
       tx.value = withTiming(target.x, { duration: 260 });
@@ -162,7 +171,7 @@ export function SwipeDeck() {
         if (done) runOnJS(advance)(direction);
       });
     },
-    [tx, ty, advance],
+    [tx, ty, advance, flyDistance],
   );
 
   const triggerSwipe = useCallback(
@@ -271,7 +280,7 @@ export function SwipeDeck() {
   const frontStyle = useAnimatedStyle(() => {
     const rotate = interpolate(
       tx.value,
-      [-SCREEN.width, 0, SCREEN.width],
+      [-screenW, 0, screenW],
       [-15, 0, 15],
       Extrapolation.CLAMP,
     );
@@ -382,18 +391,20 @@ export function SwipeDeck() {
           {/* mode segment — ALL / IN CINEMA / STREAMING */}
           <View style={styles.modeRow}>
             {(['all', 'cinema', 'streaming'] as const).map((m) => {
-              const active = mode === m;
+              const active = effectiveMode === m;
               const label = m === 'all' ? 'ALL' : m === 'cinema' ? 'IN CINEMA' : 'STREAMING';
               return (
                 <Pressable
                   key={m}
                   onPress={() => setMode(m)}
+                  disabled={!canEditGenres}
                   hitSlop={4}
                   style={[
                     styles.modeSeg,
                     {
                       borderColor: active ? accent : palette.inkFaint,
                       backgroundColor: active ? `${accent}22` : 'transparent',
+                      opacity: canEditGenres || active ? 1 : 0.5,
                     },
                   ]}
                 >
@@ -430,8 +441,13 @@ export function SwipeDeck() {
       {/* loading tracking bar — shows when refetching but we still have cards visible */}
       {loadingMore && queue.length > 0 ? <LoadingBar accent={accent} /> : null}
 
-      {/* deck area */}
-      <View style={styles.deckWrap}>
+      {/* deck area — flexes to fill the space above the action row */}
+      <View
+        style={[styles.deckWrap, { marginBottom: insets.bottom + sizes.bottomActions + sizes.actionsHeight }]}
+        onLayout={onDeckLayout}
+      >
+        {card ? (
+        <View style={{ width: card.w, height: card.h }}>
         {/* back-card peek */}
         {back ? (
           <Animated.View key={`back-${index + 1}`} style={[styles.cardSlot, backStyle]}>
@@ -490,6 +506,8 @@ export function SwipeDeck() {
             </Pressable>
           </View>
         )}
+        </View>
+        ) : null}
       </View>
 
       {/* 4 action buttons */}
@@ -574,9 +592,10 @@ const styles = StyleSheet.create({
     color: palette.inkDim,
   },
   deckWrap: {
+    flex: 1,
     marginHorizontal: spacing.edge,
     marginTop: spacing.section,
-    height: sizes.cardHeight,
+    alignItems: 'center',
   },
   cardSlot: {
     position: 'absolute',

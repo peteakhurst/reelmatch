@@ -1,21 +1,21 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { VHSBackground } from '../components/VHSOverlay';
 import { ONBOARDING_GENRES } from '../lib/genres';
 import { useUser } from '../state/user';
-import { palette, spacing, text, useAccent } from '../theme';
+import { palette, spacing, text, useAccent, useContentWidth } from '../theme';
 
-const SCREEN_W = Dimensions.get('window').width;
 const COLUMNS = 3;
 const GAP = 10;
-const CARD_W = (SCREEN_W - spacing.edge * 2 - GAP * (COLUMNS - 1)) / COLUMNS;
-const CARD_H = CARD_W * (4 / 3);
 const MIN_PICKS = 3;
 
 export function GenrePicker() {
+  const contentW = useContentWidth();
+  const CARD_W = (contentW - spacing.edge * 2 - GAP * (COLUMNS - 1)) / COLUMNS;
+  const CARD_H = CARD_W * (4 / 3);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { hex: accent } = useAccent();

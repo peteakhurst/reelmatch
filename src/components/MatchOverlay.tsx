@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Image } from 'expo-image';
-import { Dimensions, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, useWindowDimensions, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -15,9 +15,9 @@ import { posterUrl } from '../lib/api';
 import type { MatchEvent } from '../hooks/useRoom';
 import { palette, text, useAccent } from '../theme';
 
-const { width: SCREEN_W } = Dimensions.get('window');
 
 export function MatchOverlay({ match, onDismiss }: { match: MatchEvent; onDismiss: () => void }) {
+  const { width: SCREEN_W } = useWindowDimensions();
   const { hex: accent } = useAccent();
   const scale = useSharedValue(0.92);
   const opacity = useSharedValue(0);
@@ -62,7 +62,7 @@ export function MatchOverlay({ match, onDismiss }: { match: MatchEvent; onDismis
         <Text style={[text.monoMd, { color: accent, letterSpacing: 2 }]}>▸▸ REWIND COMPLETE</Text>
       </View>
       <Text style={[styles.bigTitle, { color: palette.ink }]}>
-        IT'S A{'\n'}<Text style={{ color: accent }}>MATCH.</Text>
+        IT&apos;S A{'\n'}<Text style={{ color: accent }}>MATCH.</Text>
       </Text>
 
       <View style={[styles.posterWrap, { borderColor: accent, shadowColor: accent }]}>

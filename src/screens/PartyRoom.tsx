@@ -16,12 +16,49 @@ export function PartyRoom() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { hex: accent } = useAccent();
-  const { code, members, status, commonGround, leaveRoom } = useRoomContext();
+  const { code, members, status, commonGround, leaveRoom, swipes, myId, settings, persisted } = useRoomContext();
 
   if (!code) {
     // not in a room — bounce to the create/join screen
     return <Redirect href="/party" />;
   }
+
+  if (status === 'not_found') {
+    return (
+      <VHSBackground>
+        <View style={[styles.notFound, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 24 }]}>
+          <View style={{ gap: 14 }}>
+            <Text style={[styles.eyebrow, { color: palette.red }]}>NO SIGNAL</Text>
+            <Text style={styles.title}>
+              ROOM <Text style={{ color: accent }}>#</Text>
+              {code}
+              {'\n'}NOT FOUND.
+            </Text>
+            <Text style={[text.bodyLg, { color: palette.inkDim }]}>
+              Double-check the code with whoever invited you — or start your own room.
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => {
+              leaveRoom();
+              router.replace('/party');
+            }}
+            style={[styles.solidBtn, { backgroundColor: accent, flex: 0 }]}
+          >
+            <Text style={[text.monoMd, { color: palette.bg }]}>◂ TRY ANOTHER CODE</Text>
+          </Pressable>
+        </View>
+      </VHSBackground>
+    );
+  }
+
+  const queuedCount = (memberId: string) =>
+    Object.values(swipes[memberId] ?? {}).filter((d) => d === 'right').length;
+  const memberStatus = (m: (typeof members)[number]) => {
+    const n = queuedCount(m.id);
+    const tag = m.id === myId ? 'YOU' : !persisted || m.online ? 'ONLINE' : 'AWAY';
+    return `${tag} · ${n} QUEUED`;
+  };
 
   const copyCode = async () => {
     Haptics.selectionAsync().catch(() => {});
@@ -30,7 +67,7 @@ export function PartyRoom() {
 
   const shareCode = () =>
     Share.share({
-      message: `Join my ReelMatch room — code: ${code}`,
+      message: `Join my ReelMatch room — code: ${code}. Swipe whenever, we'll match when we all queue the same film.`,
     });
 
   const start = () => {
@@ -91,7 +128,10 @@ export function PartyRoom() {
                       <Text style={[text.displayXs, { color: palette.ink }]} numberOfLines={1}>
                         {m.name}
                       </Text>
-                      <Text style={[text.monoSm, { color: c, letterSpacing: 1.5 }]}>JOINED</Text>
+                      <Text style={[text.monoSm, { color: c, letterSpacing: 1.5 }]} numberOfLines={1}>
+                        {settings?.hostId === m.id ? '★ ' : ''}
+                        {memberStatus(m)}
+                      </Text>
                     </View>
                   </View>
                 );
@@ -112,7 +152,7 @@ export function PartyRoom() {
             <Text style={{ color: palette.inkDim, fontSize: 22 }}> common</Text>
           </Text>
           <Text style={[text.monoSm, { color: palette.inkFaint, letterSpacing: 1.5 }]}>
-            FILMS EVERYONE QUEUED SO FAR
+            FILMS 2+ OF YOU QUEUED · SWIPE ANYTIME, IT SAVES
           </Text>
 
           <View style={styles.posterGrid}>
@@ -203,6 +243,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
+  notFound: { flex: 1, paddingHorizontal: spacing.edge, justifyContent: 'space-between' },
   ghostBtn: { flex: 1, paddingVertical: 14, borderWidth: 1.5, alignItems: 'center' },
   solidBtn: { flex: 2, paddingVertical: 14, alignItems: 'center' },
 });

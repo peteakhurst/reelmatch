@@ -45,6 +45,18 @@ export const motion = {
 
 export const sizes = {
   topChromeTop: 60,
-  cardHeight: 510,
+  /** Poster-ish width:height of the swipe card. */
+  cardAspect: 0.69,
   bottomActions: 36,
+  /** Room reserved under the deck for the action buttons + labels. */
+  actionsHeight: 100,
+} as const;
+
+export const layout = {
+  /**
+   * Widest the app's content column gets. Phones are narrower than this so
+   * nothing changes there; on wide screens (iPhone Duo unfolded, iPad, web)
+   * content stays a readable centred column instead of stretching.
+   */
+  maxContentWidth: 560,
 } as const;
